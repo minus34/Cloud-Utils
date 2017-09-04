@@ -1,0 +1,48 @@
+{
+  "instances": [
+    {
+      "instance_name": "postgres ubuntu server",
+      "instance_owner": "minus34",
+      "bash_file": "./bash_scripts/server-setup.sh",
+      "s3_bucket": "minus34.com",
+      "purpose": "stores data :-)",
+      "external_client_ip": "123.045.067.089/32",
+      "availability_zone": "ap-southeast-2",
+      "ami_id": "ami-bb1901d8",
+      "build_id": "t2.micro",
+      "pem_file": "/Users/hugh/.aws/loceng-key.pem",
+      "key_name": "loceng-key",
+      "installs": [
+        "nginx",
+        "flask",
+        "postgis"
+      ],
+      "security_groups": [
+        {
+          "name": "private_postgres",
+          "type": "private",
+          "port": 5432,
+          "delete_after_build": false
+        },
+        {
+          "name": "public_ssh",
+          "type": "public",
+          "port": 22,
+          "delete_after_build": true
+        },
+        {
+          "name": "public_http",
+          "type": "public",
+          "port": 80,
+          "delete_after_build": false
+        },
+        {
+          "name": "public_https",
+          "type": "public",
+          "port": 443,
+          "delete_after_build": false
+        }
+      ]
+    }
+  ]
+}
