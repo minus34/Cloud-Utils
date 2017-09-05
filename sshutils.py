@@ -2,6 +2,7 @@
 # utilities for running SSH commands on remote computers
 #
 
+import os
 import paramiko
 import time
 
@@ -30,6 +31,15 @@ def get_ssh_connection(logger, ip_address, pem_file, user_name):
 
     except Exception as ex:
         logger.fatal("Couldn't create SSH connection to {0} : {1}".format(ip_address, ex))
+        return None
+
+
+def open_bash_script(logger, bash_file):
+    try:
+        bash_script = open(bash_file, 'r').read()
+        return bash_script.split("\n")
+    except Exception as ex:
+        logger.fatal("Couldn't open {0} : {1}".format(bash_file, ex))
         return None
 
 
@@ -73,9 +83,11 @@ def run_command(logger, ssh_client, cmd, admin_password=None):
 # run update and upgrade on remote computer and reboot
 def update_upgrade_instance(logger, ssh_client, instance_id, reboot_time=60):
     try:
-        run_command(logger, ssh_client, "sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y update")
-        run_command(logger, ssh_client, "sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y -o Dpkg::Options::"
-                                        "='--force-confdef' -o Dpkg::Options::='--force-confold' dist-upgrade")
+        bash_commands = open_bash_script(logger, bash_file)
+
+        for cmd in bash_commands:
+            if cmd[:1] != "#" and cmd[:1].strip(" ") != "":  # ignore comments and blank lines
+                run_command(logger, ssh_client, cmd)
 
         logger.info("EC2 instance {} updated & upgraded".format(instance_id))
         logger.info("")
