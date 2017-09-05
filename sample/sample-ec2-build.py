@@ -124,6 +124,10 @@ def main():
         # TODO: test the thing is working and the response is valid
 
         # # data and code loaded - run the thing using gunicorn!
+
+        # cd ../geo_programme/events/major_events_service/pif_extract/
+        # sudo gunicorn  -w {0} server:app -p server.pid -b 127.0.0.1:8081 -D
+
         # cmd = "sudo gunicorn -w {0} -D --pythonpath ~/ -b 127.0.0.1:80 map_services:app" \
         #     .format(2)
         #     # .format(cpu_count * 2)
