@@ -8,6 +8,8 @@ import time
 
 from datetime import datetime
 
+BASH_DIRECTORY = os.path.dirname(os.path.abspath(__file__)) + os.sep + "bash_scripts" + os.sep
+
 
 # create an SSH connection to a remote computer using Paramiko
 def get_ssh_connection(logger, ip_address, pem_file, user_name):
@@ -35,9 +37,17 @@ def get_ssh_connection(logger, ip_address, pem_file, user_name):
 
 
 def open_bash_script(logger, bash_file):
+
+    output_commands = list()
+
     try:
         bash_script = open(bash_file, 'r').read()
-        return bash_script.split("\n")
+        commands = bash_script.split("\n")
+        for cmd in commands:
+            if cmd[:1] != "#" and cmd[:1].strip(" ") != "":  # ignore comments and blank lines
+                output_commands.append(cmd)
+
+        return output_commands
     except Exception as ex:
         logger.fatal("Couldn't open {0} : {1}".format(bash_file, ex))
         return None
@@ -83,22 +93,24 @@ def run_command(logger, ssh_client, cmd, admin_password=None):
 # run update and upgrade on remote computer and reboot
 def update_upgrade_instance(logger, ssh_client, instance_id, reboot_time=60):
     try:
-        bash_commands = open_bash_script(logger, bash_file)
+        bash_commands = open_bash_script(logger, BASH_DIRECTORY + "update_upgrade.sh")
 
-        for cmd in bash_commands:
-            if cmd[:1] != "#" and cmd[:1].strip(" ") != "":  # ignore comments and blank lines
+        if bash_commands:
+            for cmd in bash_commands:
                 run_command(logger, ssh_client, cmd)
 
-        logger.info("EC2 instance {} updated & upgraded".format(instance_id))
-        logger.info("")
+            logger.info("EC2 instance {} updated & upgraded".format(instance_id))
+            logger.info("")
 
-        # reboot and wait for restart
-        run_command(logger, ssh_client, "sudo reboot")
+            # # reboot and wait for restart
+            # run_command(logger, ssh_client, "sudo reboot")
 
-        logger.info("Waiting 60s for instance to reboot...")
-        time.sleep(reboot_time)
+            logger.info("Waiting 60s for instance to reboot...")
+            time.sleep(reboot_time)
 
-        return True
+            return True
+        else:
+            return False
 
     except Exception as ex:
         logger.fatal("Couldn't update & upgrade and reboot {0} : {1}".format(instance_id, ex))
