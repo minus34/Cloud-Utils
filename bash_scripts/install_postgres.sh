@@ -5,14 +5,16 @@
 #
 # Input vars:
 #   0 = postgres user password
-#   1 = read only user (rouser) password
+#   1 = read-only user (rouser) password
 #   2 = CIDP IP range that can access the database server
 #
 # --------------------------------------------------------------------------------------
 
-# install Postgres
+# add repo
 sudo add-apt-repository -y "deb http://apt.postgresql.org/pub/repos/apt/ xenial-pgdg main"
 wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+
+# install
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y update
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6-postgis-2.3 postgresql-contrib-9.6

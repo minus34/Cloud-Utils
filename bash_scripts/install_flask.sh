@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # --------------------------------------------
-# install required python modules
+# install pip and required python modules
 # --------------------------------------------
 
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install python3-pip
