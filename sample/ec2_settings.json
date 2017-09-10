@@ -1,6 +1,8 @@
 {
   "instances": [
     {
+      "provider": "aws",
+      "instance_type": "ec2",
       "instance_name": "postgres ubuntu server",
       "instance_owner": "minus34",
       "bash_file": "./bash_scripts/server-setup.sh",
