@@ -10,8 +10,8 @@
       "availability_zone": "ap-southeast-2",
       "ami_id": "ami-bb1901d8",
       "build_id": "t2.micro",
-      "pem_file": "/Users/hugh/.aws/loceng-key.pem",
-      "key_name": "loceng-key",
+      "pem_file": "~/.aws/ec2-default.pem",
+      "key_name": "Default",
       "installs": [
         "nginx",
         "flask",
