@@ -11,10 +11,10 @@
 # install Postgres
 sudo add-apt-repository -y "deb http://apt.postgresql.org/pub/repos/apt/ xenial-pgdg main"
 wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y update
-sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install postgresql-9.6
-sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install postgresql-9.6-postgis-2.3 postgresql-contrib-9.6
-sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install postgis
+sudo DEBIAN_FRONTEND=noninteractive apt -q -y update
+sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6
+sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6-postgis-2.3 postgresql-contrib-9.6
+sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgis
 
 # ---------------------------------------------------
 # STEP 2 - restore data to Postgres and run server

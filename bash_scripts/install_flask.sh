@@ -4,7 +4,7 @@
 # install required python modules
 # --------------------------------------------
 
-sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install python3-pip
+sudo DEBIAN_FRONTEND=noninteractive apt -q -y install python3-pip
 sudo -H pip3 install --upgrade pip
 
 sudo -H pip3 install gunicorn

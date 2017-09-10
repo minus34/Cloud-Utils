@@ -354,7 +354,7 @@ def install_awscli_tools(logger, ssh_client):
 
     # install awscli tools
     sshutils.run_command(logger, ssh_client,
-                         "sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install python3-pip python3-dev")
+                         "sudo DEBIAN_FRONTEND=noninteractive apt -q -y install python3-pip python3-dev")
     sshutils.run_command(logger, ssh_client, "sudo -H pip3 install --upgrade pip")
     sshutils.run_command(logger, ssh_client, "sudo -H pip install awscli")
 
