@@ -13,7 +13,7 @@ sudo bash -c "echo 'deb http://nginx.org/packages/mainline/ubuntu/ xenial nginx'
 sudo bash -c "echo 'deb-src http://nginx.org/packages/mainline/ubuntu/ xenial nginx' >> /etc/apt/sources.list"
 
 # install
-AN_FRONTEND=noninteractive apt-get -q -y update
+sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y install nginx
 
 # configure & start
