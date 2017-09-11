@@ -5,15 +5,24 @@
 #
 # Input vars:
 #   0 = S3 bucket name (and folder name if not in the root folder)
-#   1 = pg_dump file name
+#   1 = pg_dump file name(s) - space delimited
 #   2 = schema name(s) - space delimited
 #
 # --------------------------------------------------------------------------------------------------------
 
 # restore schema(s)
 sudo mkdir ~/data
-sudo aws s3 cp s3://{0}/{1} ~/data/{1}
-sudo pg_restore -Fc -v -d postgres -p 5432 -U postgres -h localhost ~/data/{1}
+cd ~/data/
+
+# copy dump file(s) from S3 to instance
+files=({1})
+for file in ${files[@]}; do
+    sudo aws s3 cp s3://{0}/${file} ~/data/${file}
+    sudo pg_restore -Fc -v -d postgres -p 5432 -U postgres -h localhost ~/data/${file}
+
+    # delete dump file
+    sudo find . -name "{1}" -type f -delete
+done
 
 # grant read-only user access to all tables & sequences for each schema in the dump file
 schemas=({2})
@@ -25,7 +34,3 @@ for name in ${schemas[@]}; do
     sudo -u postgres psql -c "ALTER DEFAULT PRIVILEGES IN SCHEMA ${name} GRANT SELECT ON TABLES TO rouser;" postgres
     sudo -u postgres psql -c "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${name} TO rouser;" postgres
 done
-
-# delete dump files
-cd ~/data/
-sudo find . -name "{1}" -type f -delete

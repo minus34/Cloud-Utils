@@ -334,8 +334,9 @@ def create_public_ip_address(logger, client, instance_id):
         return None
 
 
-# setup awscli tools on instance for access to other AWS resources (e.g. copy files securely from S3 to EC2)
 def install_awscli_tools(logger, ssh_client):
+    """setup awscli tools on instance. For access to other AWS resources (e.g. copy files securely from S3 to EC2)"""
+
     # get AWS credentials (required to copy pg_dump files from S3)
     from pathlib import Path
     home = str(Path.home())
