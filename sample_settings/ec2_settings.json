@@ -4,9 +4,9 @@
   "instances": [
     {
 
-      "instance_type": "ec2",
-      "instance_name": "postgres ubuntu server",
-      "instance_owner": "minus34",
+      "type": "ec2",
+      "name": "postgres ubuntu server",
+      "owner": "minus34",
       "bash_file": "./bash_scripts/server-setup.sh",
       "s3_bucket": "minus34.com",
       "purpose": "stores data :-)",
