@@ -1,4 +1,6 @@
 
+
+
 import json
 import logging
 import os
@@ -13,39 +15,8 @@ import sshutils
 logging.getLogger("paramiko").setLevel(logging.INFO)
 
 
-# list of instances to terminate & create
-EC2_INSTANCE_DICTS = [
-
-    {"name": "Super Mega Server",
-     "owner": OWNER,
-     "purpose": "LocEng Choice of Repairer testing",
-     "external_ip": EXTERNAL_IP_ADDRESS,
-     "availability_zone": AVAILABILITY_ZONE,
-     "ami_id": AMI_ID,
-     "build_id": BUILD_ID,
-     "pem_file": PEM_FILE,
-     "key_name": KEY_NAME,
-     "security_groups": [
-            # {"name": "public_postgres", "type": "public", "port": 5432, "delete_after_build": False},  # postgres
-            {"name": "private_postgres", "type": "private", "port": 5432, "delete_after_build": False},  # postgres
-            {"name": "public_ssh", "type": "public", "port": 22, "delete_after_build": True},     # ssh
-            # {"name": "public_http", "type": "public", "port": 80, "delete_after_build": False}  # postgres
-            # {"name": "public_https", "type": "public", "port": 443, "delete_after_build": False}  # postgres
-        ]
-     }
-]
-
-CONF_FILE = os.path.dirname(os.path.abspath(__file__)) + "/ec2.json"
-
-
-def main():
+def build_servers(settings, logger, proxy=None):
     full_start_time = datetime.now()
-
-    # get proxy settings from passwords.ini file
-    if use_proxy:
-        proxy = proxies["https"]
-    else:
-        proxy = None
 
     # get EC2 client and service resources
     client, resources = awsutils.init(logger, AVAILABILITY_ZONE, False, "https", proxy)
@@ -150,32 +121,3 @@ def main():
 
     return True
 
-
-if __name__ == '__main__':
-    # set logger
-    logger = logging.getLogger()
-    log_file = os.path.abspath(__file__).replace(".py", ".log")
-    logging.basicConfig(filename=log_file, level=logging.DEBUG, format="%(asctime)s %(message)s",
-                        datefmt="%m/%d/%Y %I:%M:%S %p")
-
-    # setup logger to write to screen as well as writing to log file
-    # define a Handler which writes INFO messages or higher to the sys.stderr
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    # set a format which is simpler for console use
-    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-    # tell the handler to use this format
-    console.setFormatter(formatter)
-    # add the handler to the root logger
-    logging.getLogger('').addHandler(console)
-
-    logger.info("")
-    logger.info("Start EC2 deployment")
-
-    if main():
-        logger.info("Finished successfully!")
-    else:
-        logger.fatal("Something bad happened!")
-
-    logger.info("")
-    logger.info("-------------------------------------------------------------------------------")

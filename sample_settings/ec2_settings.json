@@ -1,13 +1,16 @@
 {
+  "provider": "aws",
+  "proxy": "http://<myproxyserver>",
   "instances": [
     {
-      "provider": "aws",
+
       "instance_type": "ec2",
       "instance_name": "postgres ubuntu server",
       "instance_owner": "minus34",
       "bash_file": "./bash_scripts/server-setup.sh",
       "s3_bucket": "minus34.com",
       "purpose": "stores data :-)",
+      "vpc": "<vpc-id>"
       "external_client_ip": "123.045.067.089/32",
       "availability_zone": "ap-southeast-2",
       "ami_id": "ami-bb1901d8",
