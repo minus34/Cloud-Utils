@@ -6,7 +6,6 @@ import os
 from datetime import datetime
 
 from aws import awsutils
-import pwdutils
 import sshutils
 
 logging.getLogger("paramiko").setLevel(logging.INFO)
@@ -57,11 +56,16 @@ def create_ec2_instance(instance, logger, proxy):
         return False
 
     # get VPC details
-    vpc_id, subnet_id, ipv4_cidr = awsutils.vpc_details(logger, resources)
+    if "vpc" in instance:
+        vpc_id, subnet_id, ipv4_cidr = awsutils.vpc_details(logger, resources, vpc_id=instance["vpc"])
+    else:
+        vpc_id, subnet_id, ipv4_cidr = awsutils.vpc_details(logger, resources)
+
     if ipv4_cidr is None:
         return False
 
-    # create EC2 instance after cleaning up old resources (NOT PROD GRADE CI CODE)
+    # create EC2 instance after cleaning up old resources (NOT PROD GRADE CONTINOUS INTEGRATION CODE)
+    # TODO: Support versioning of EC2 instances
 
     # delete EC2 instance(s) with the same names, as well as the Elastic IPs assigned to them
     if not awsutils.terminate_ec2_instances(instance, logger, client, resources, EC2_INSTANCE_DICTS):

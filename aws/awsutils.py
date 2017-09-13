@@ -1,6 +1,8 @@
 
 import boto3
 import time
+
+import pwdutils
 import sshutils
 
 from botocore.config import Config
@@ -31,11 +33,14 @@ def init(logger, availability_zone, verify_certificate=True, protocol="https", p
 
 
 # return vpc, subnet and IPv4 CIDR address range from the first VPC and subnet in their respective lists
-def vpc_details(logger, resources):
+def vpc_details(logger, resources, vpc_id=None):
 
     try:
-        vpc = list(resources.vpcs.all())[0]
-        vpc_id = vpc.id
+        if vpc_id is None:
+            vpc = list(resources.vpcs.all())[0]
+            vpc_id = vpc.id
+        else:
+            vpc = resources.Vpc(vpc_id)
 
         subnet = list(vpc.subnets.all())[0]
         subnet_id = subnet.id
@@ -256,8 +261,8 @@ def create_ec2_instance(logger, client, resources, instance_dicts, vpc_id, subne
             ec2_dict["subnet_id"] = subnet_id
             ec2_dict["security_groups"] = sg_dicts
             # add random user passwords for admin and readonly users (mostly useful for Postgres)
-            ec2_dict["admin_password"] = sshutils.create_random_password()
-            ec2_dict["readonly_password"] = sshutils.create_random_password()
+            ec2_dict["admin_password"] = pwdutils.create_random_password()
+            ec2_dict["readonly_password"] = pwdutils.create_random_password()
             ec2_dicts.append(ec2_dict)
 
         return ec2_dicts
