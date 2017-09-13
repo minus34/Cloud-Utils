@@ -57,51 +57,48 @@ def vpc_details(logger, resources, vpc_id=None):
 
 
 # terminate all EC2 instances with the chosen name, and release all Elastic IP addresses associated with them
-def terminate_ec2_instances(logger, client, resources, instance_dicts):
+def terminate_ec2_instances(logger, client, resources, instance_name):
     try:
         # get instances and Elastic IP addresses
-        instance_collection = list(resources.instances.all())
+        ec2_instance_collection = list(resources.instances.all())
 
         num_terminated = 0
 
         # terminate all instances and their Elastic IP addresses that match the instance name provided
-        if len(instance_collection) > 0:
-            for instance in instance_collection:
-                if instance.tags is not None:
-                    for tag in instance.tags:
+        if len(ec2_instance_collection) > 0:
+            for ec2_instance in ec2_instance_collection:
+                if ec2_instance.tags is not None:
+                    for tag in ec2_instance.tags:
                         if tag["Key"] == "Name":
-                            for row in instance_dicts:
-                                instance_name = row["name"]
+                            if tag["Value"] == instance_name:
+                                instance_id = ec2_instance.id
 
-                                if tag["Value"] == instance_name:
-                                    instance_id = instance.id
+                                # release elastic IP address for instance
+                                if ec2_instance.public_ip_address is not None:
+                                    if not release_elastic_ip(logger, client, instance_id):
+                                        return False
 
-                                    # release elastic IP address for instance
-                                    if instance.public_ip_address is not None:
-                                        if not release_elastic_ip(logger, client, instance_id):
-                                            return False
+                                # terminate instance
+                                state = ec2_instance.state["Name"]
+                                if state != "terminated" and state != "shutting-down":
+                                    logger.info("Terminating EC2 instance {0} ({1})"
+                                                .format(instance_name, instance_id))
 
-                                    # terminate instance
-                                    state = instance.state["Name"]
-                                    if state != "terminated" and state != "shutting-down":
-                                        logger.info("Terminating EC2 instance {0} ({1})"
-                                                    .format(instance_name, instance_id))
+                                    ec2_instance.terminate()
+                                    num_terminated += 1
 
-                                        instance.terminate()
-                                        num_terminated += 1
+                                    # wait until instance is terminated to delete security group
+                                    while state != "terminated":
+                                        logger.info("Waiting 15s for instance to terminate. Current state is {}"
+                                                    .format(state))
+                                        time.sleep(15)
+                                        curr_instance = resources.Instance(instance_id)
+                                        state = curr_instance.state["Name"]
 
-                                        # wait until instance is terminated to delete security group
-                                        while state != "terminated":
-                                            logger.info("Waiting 15s for instance to terminate. Current state is {}"
-                                                        .format(state))
-                                            time.sleep(15)
-                                            curr_instance = resources.Instance(instance_id)
-                                            state = curr_instance.state["Name"]
-
-                                        logger.info("EC2 instance {0} ({1}) terminated"
-                                                    .format(instance_name, instance_id))
-                                        # wait a bit more for the security group to be become disassociated
-                                        # time.sleep(15)
+                                    logger.info("EC2 instance {0} ({1}) terminated"
+                                                .format(instance_name, instance_id))
+                                    # wait a bit more for the security group to be become disassociated
+                                    # time.sleep(15)
 
         if num_terminated == 0:
             logger.info("No EC2 instances to terminate")
@@ -138,18 +135,15 @@ def release_elastic_ip(logger, client, instance_id):
 
 
 # delete security groups. Useful if changing the external IP address (e.g from Home to Work)
-def delete_security_groups(logger, client, instance_dicts):
+def delete_security_groups(logger, client, security_groups):
     # get all security groups
     sg_dict = client.describe_security_groups()
 
     # get security groups assigned to instance(s)
     sg_names_to_delete = list()
 
-    for instance_dict in instance_dicts:
-        instance_sg_dicts = instance_dict["security_groups"]
-
-        for instance_sg_dict in instance_sg_dicts:
-            sg_names_to_delete.append(instance_sg_dict["name"])
+    for security_group in security_groups:
+        sg_names_to_delete.append(security_group["name"])
 
     num_deleted = 0
 
@@ -158,13 +152,13 @@ def delete_security_groups(logger, client, instance_dicts):
         for sg in sg_dict["SecurityGroups"]:
             if sg["GroupName"] == sg_name:
                 sg_id = sg["GroupId"]
+
                 try:
                     client.delete_security_group(GroupId=sg_id)
                     num_deleted += 1
                     logger.info("Security group {0} ({1}) deleted".format(sg_name, sg_id))
                 except Exception as ex:
-                    logger.fatal("Couldn't delete security group {0} ({1}): {2}"
-                                 .format(sg_name, sg_id, ex))
+                    logger.fatal("Couldn't delete security group {0} ({1}): {2}".format(sg_name, sg_id, ex))
                     return False
 
     if num_deleted == 0:
@@ -174,152 +168,151 @@ def delete_security_groups(logger, client, instance_dicts):
 
 
 # create an EC2 instance and a SecurityGroup for it (if it doesn't exist)
-def create_ec2_instance(logger, client, resources, instance_dicts, vpc_id, subnet_id, ipv4_cidr):
+def create_ec2_instance(logger, client, resources, instance, vpc_id, subnet_id, ipv4_cidr):
 
     # create security group(s)
-    sg_dicts = create_security_groups(logger, client, instance_dicts, vpc_id, ipv4_cidr)
+    sg_dicts = create_security_groups(logger, client, instance, vpc_id, ipv4_cidr)
 
     if sg_dicts is None:
         logger.fatal("Not all security groups could be created - EC2 instance creation aborted")
         return False
     else:
-        ec2_dicts = list()
+        # get the security group IDs required for this instance
+        sg_ids = list()
+        for sg_dict in sg_dicts:
+            for instance_sg_dict in instance["security_groups"]:
+                if instance_sg_dict["name"] == sg_dict["name"]:
+                    sg_ids.append(sg_dict["id"])
 
-        for instance_dict in instance_dicts:
-            # get the security group IDs required for this instance
-            sg_ids = list()
-            for sg_dict in sg_dicts:
-                for instance_sg_dict in instance_dict["security_groups"]:
-                    if instance_sg_dict["name"] == sg_dict["name"]:
-                        sg_ids.append(sg_dict["id"])
+        # create EC2 instance
+        try:
+            response_dict = resources.create_instances(
+                ImageId=instance["ami_id"],
+                MinCount=1,
+                MaxCount=1,
+                KeyName=instance["key_name"],
+                InstanceType=instance["build_id"],
+                SubnetId=subnet_id,
+                SecurityGroupIds=sg_ids,
+                Placement={"AvailabilityZone": instance["availability_zone"] + "c"},
+                TagSpecifications=[
+                    {
+                        'ResourceType': "instance",
+                        'Tags': [
+                            {
+                                "Key": "Name",
+                                "Value": instance["name"]
+                            },
+                            {
+                                "Key": "Owner",
+                                "Value": instance["owner"]
+                            },
+                            {
+                                "Key": "Purpose",
+                                "Value": instance["purpose"]
+                            },
+                        ]
+                    },
+                ],
+                DryRun=False
+            )
 
-            # create EC2 instance
-            try:
-                response_dict = resources.create_instances(
-                    ImageId=instance_dict["ami_id"],
-                    MinCount=1,
-                    MaxCount=1,
-                    KeyName=instance_dict["key_name"],
-                    InstanceType=instance_dict["build_id"],
-                    SubnetId=subnet_id,
-                    SecurityGroupIds=sg_ids,
-                    Placement={"AvailabilityZone": instance_dict["availability_zone"] + "c"},
-                    TagSpecifications=[
-                        {
-                            'ResourceType': "instance",
-                            'Tags': [
-                                {
-                                    "Key": "Name",
-                                    "Value": instance_dict["name"]
-                                },
-                                {
-                                    "Key": "Owner",
-                                    "Value": instance_dict["owner"]
-                                },
-                                {
-                                    "Key": "Purpose",
-                                    "Value": instance_dict["purpose"]
-                                },
-                            ]
-                        },
-                    ],
-                    DryRun=False
-                )
+            # get instance info
+            instance_id = response_dict[0].id
+            instance_private_ip = response_dict[0].private_ip_address
 
-                # get instance info
-                instance_id = response_dict[0].id
-                instance_private_ip = response_dict[0].private_ip_address
+            logger.info("EC2 instance {0} ({1}) created".format(instance["name"], instance_id))
+            logger.info("Private IP address: {0}".format(instance_private_ip))
+        except Exception as ex:
+            logger.fatal("Couldn't create EC2 instance  {0}: {1}".format(instance["name"], ex))
+            return None
 
-                logger.info("EC2 instance {0} ({1}) created".format(instance_dict["name"], instance_id))
-                logger.info("Private IP address: {0}".format(instance_private_ip))
-            except Exception as ex:
-                logger.fatal("Couldn't create EC2 instance  {0}: {1}".format(instance_dict["name"], ex))
-                return None
+        # wait until instance is running
+        state = "pending"
+        while state == "pending":
+            logger.info("Waiting 10s for instance to start. Current state is {0}".format(state))
+            time.sleep(10)
+            ec2_instance = resources.Instance(instance_id)
+            state = ec2_instance.state["Name"]
 
-            # wait until instance is running
-            state = "pending"
-            while state == "pending":
-                logger.info("Waiting 10s for instance to start. Current state is {0}".format(state))
-                time.sleep(10)
-                instance = resources.Instance(instance_id)
-                state = instance.state["Name"]
+        # get a public IP address for the instance
+        instance_public_ip = create_public_ip_address(logger, client, instance_id)
+        if instance_public_ip is None:
+            return None
 
-            # get a public IP address for the instance
-            instance_public_ip = create_public_ip_address(logger, client, instance_id)
-            if instance_public_ip is None:
-                return None
+        logger.info('Instance is running - waiting 30 seconds for boot up...')
+        time.sleep(30)
 
-            logger.info('Instance is running - waiting 30 seconds for boot up...')
-            time.sleep(30)
+        ec2_dict = dict()
+        ec2_dict["name"] = instance["name"]
+        ec2_dict["id"] = instance_id
+        ec2_dict["private_ip"] = instance_private_ip
+        ec2_dict["public_ip"] = instance_public_ip
+        ec2_dict["vpc_id"] = vpc_id
+        ec2_dict["subnet_id"] = subnet_id
+        ec2_dict["security_groups"] = sg_dicts
+        # add random user passwords for admin and readonly users (mostly useful for Postgres)
+        ec2_dict["admin_password"] = pwdutils.create_random_password()
+        ec2_dict["readonly_password"] = pwdutils.create_random_password()
 
-            ec2_dict = dict()
-            ec2_dict["name"] = instance_dict["name"]
-            ec2_dict["id"] = instance_id
-            ec2_dict["private_ip"] = instance_private_ip
-            ec2_dict["public_ip"] = instance_public_ip
-            ec2_dict["vpc_id"] = vpc_id
-            ec2_dict["subnet_id"] = subnet_id
-            ec2_dict["security_groups"] = sg_dicts
-            # add random user passwords for admin and readonly users (mostly useful for Postgres)
-            ec2_dict["admin_password"] = pwdutils.create_random_password()
-            ec2_dict["readonly_password"] = pwdutils.create_random_password()
-            ec2_dicts.append(ec2_dict)
-
-        return ec2_dicts
+        return ec2_dict
 
 
-def create_security_groups(logger, client, instance_dicts, vpc_id, ipv4_cidr):
+def create_security_groups(logger, client, instance, vpc_id, ipv4_cidr):
 
-    # output dictioanry of security group info
+    # output dictionary of security group info
     sg_dicts = list()
 
     #  get list of security groups to create
     sg_names = list()
 
-    for instance_dict in instance_dicts:
-        for sg in instance_dict["security_groups"]:
-            sg_name = sg["name"]
+    for sg in instance["security_groups"]:
+        sg_name = sg["name"]
 
-            if sg["name"] not in sg_names:
-                sg_names.append(sg_name)
+        if sg["name"] not in sg_names:
+            sg_names.append(sg_name)
 
-                sg_port = sg["port"]
-        
-                # get CIDR IP range
-                if sg["type"] == "public":
-                    sg_cidrip = instance_dict["external_ip"]
+            sg_port = sg["port"]
+
+            # get CIDR IP range
+            if sg["type"] == "public":
+                if "external_ip" in instance:
+                    sg_cidrip = instance["external_ip"]
                 else:
-                    sg_cidrip = ipv4_cidr
-
-                # create security group(s)
-                try:
-                    response_dict = client.create_security_group(GroupName=sg_name, Description=sg_name, VpcId=vpc_id)
-                    sg_id = response_dict['GroupId']
-
-                    client.authorize_security_group_ingress(
-                        GroupId=sg_id,
-                        IpPermissions=[
-                            {
-                                'IpProtocol': 'tcp',
-                                'FromPort': sg_port,
-                                'ToPort': sg_port,
-                                'IpRanges': [{'CidrIp': sg_cidrip}]
-                            }
-                        ])
-                    logger.info("Security group {0} ({1}) created in VPC {2}"
-                                .format(sg_name, sg_id, vpc_id))
-
-                    sg_dict = dict()
-                    sg_dict["name"] = sg_name
-                    sg_dict["id"] = sg_id
-                    sg_dict["type"] = sg["type"]
-                    sg_dict["port"] = sg_port
-                    sg_dict["cidrip"] = sg_cidrip
-                    sg_dicts.append(sg_dict)
-
-                except Exception as ex:
-                    logger.fatal("Couldn't create security group {0}: {1}".format(sg_name, ex))
+                    logger.fatal("External IP not set for public security group {0}".format(sg_name))
                     return None
+            else:
+                sg_cidrip = ipv4_cidr
+
+            # create security group(s)
+            try:
+                response_dict = client.create_security_group(GroupName=sg_name, Description=sg_name, VpcId=vpc_id)
+                sg_id = response_dict['GroupId']
+
+                client.authorize_security_group_ingress(
+                    GroupId=sg_id,
+                    IpPermissions=[
+                        {
+                            'IpProtocol': 'tcp',
+                            'FromPort': sg_port,
+                            'ToPort': sg_port,
+                            'IpRanges': [{'CidrIp': sg_cidrip}]
+                        }
+                    ])
+                logger.info("Security group {0} ({1}) created in VPC {2}"
+                            .format(sg_name, sg_id, vpc_id))
+
+                sg_dict = dict()
+                sg_dict["name"] = sg_name
+                sg_dict["id"] = sg_id
+                sg_dict["type"] = sg["type"]
+                sg_dict["port"] = sg_port
+                sg_dict["cidrip"] = sg_cidrip
+                sg_dicts.append(sg_dict)
+
+            except Exception as ex:
+                logger.fatal("Couldn't create security group {0}: {1}".format(sg_name, ex))
+                return None
 
     return sg_dicts
 

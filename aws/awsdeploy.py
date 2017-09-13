@@ -55,8 +55,9 @@ def create_ec2_instance(instance, logger, proxy):
     if resources is None:
         return False
 
-    # get VPC details
+    # get VPC
     if "vpc" in instance:
+        # TODO: make this bit more logical
         vpc_id, subnet_id, ipv4_cidr = awsutils.vpc_details(logger, resources, vpc_id=instance["vpc"])
     else:
         vpc_id, subnet_id, ipv4_cidr = awsutils.vpc_details(logger, resources)
@@ -68,11 +69,12 @@ def create_ec2_instance(instance, logger, proxy):
     # TODO: Support versioning of EC2 instances
 
     # delete EC2 instance(s) with the same names, as well as the Elastic IPs assigned to them
-    if not awsutils.terminate_ec2_instances(instance, logger, client, resources, EC2_INSTANCE_DICTS):
+    if not awsutils.terminate_ec2_instances(logger, client, resources, instance["name"]):
         return False
 
     # OPTIONAL - delete security groups. Useful if changing the external IP address (e.g from Home to Work)
-    if not awsutils.delete_security_groups(logger, client, EC2_INSTANCE_DICTS):
+    # TODO: Actually make this optional
+    if not awsutils.delete_security_groups(logger, client, instance["security_groups"]):
         return False
 
     # create instance, along with elastic IP and SecurityGroup(s)
