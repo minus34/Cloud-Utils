@@ -6,16 +6,16 @@ import os
 
 logging.getLogger("paramiko").setLevel(logging.INFO)
 
-# get config file argument
-parser = argparse.ArgumentParser(description='Builds one or more server instance on your cloud provider of choice.')
-parser.add_argument('--config', help='JSON file containing your config settings')
-args = parser.parse_args()
-
 
 def main():
+    # get config file argument
+    parser = argparse.ArgumentParser(description='Builds one or more server instance on your cloud provider of choice.')
+    parser.add_argument('--config', help='JSON file containing your config settings')
+    args = parser.parse_args()
+
     # get config file path
-    config_path = args.config or os.path.dirname(os.path.realpath(__file__)) + os.sep + "sample_settings" + \
-                                 os.sep + "ec2_settings.json"
+    config_path = args.config or os.path.dirname(os.path.realpath(__file__)) + os.sep + "sample_settings"\
+        + os.sep + "ec2.json"
 
     # load config into setting dictionary
     file = open(config_path, "r").read()
@@ -31,6 +31,9 @@ def main():
     if settings["provider"] == "aws":
         from aws import awsdeploy
         result = awsdeploy.build_servers(settings, logger, proxy)
+    # elif settings["provider"] == "azure":
+    #     from azure import azuredeploy
+    #     # Do Azure stuff
     else:
         logger.fatal("Only AWS deployments supported at this time")
         result = False
