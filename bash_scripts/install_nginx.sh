@@ -24,4 +24,9 @@ sudo systemctl unmask nginx
 sudo systemctl enable nginx
 sudo systemctl start nginx
 
+# add required directories
+sudo mkdir /etc/nginx/sites-available
+sudo mkdir /etc/nginx/sites-enabled
+sudo mkdir -p /var/www/minus34.com/html
+
 # add new site
