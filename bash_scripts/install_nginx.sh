@@ -25,8 +25,8 @@ sudo systemctl enable nginx
 sudo systemctl start nginx
 
 # add required directories
-#sudo mkdir /etc/nginx/sites-available
-#sudo mkdir /etc/nginx/sites-enabled
+sudo mkdir /etc/nginx/sites-available
+sudo mkdir /etc/nginx/sites-enabled
 
 sudo mkdir -p /home/ubuntu/www
 sudo chown -R ubuntu:www-data /home/ubuntu/www
