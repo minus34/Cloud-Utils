@@ -24,12 +24,20 @@ sudo systemctl unmask nginx
 sudo systemctl enable nginx
 sudo systemctl start nginx
 
-# add required directories
-sudo mkdir /etc/nginx/sites-available
-sudo mkdir /etc/nginx/sites-enabled
+# add required directories and symbolic link between them
+sudo mkdir -p /etc/nginx/sites-available/minus34.com
+sudo mkdir -p /etc/nginx/sites-enabled/minus34.com
+sudo ln -s /etc/nginx/sites-available/minus34.com /etc/nginx/sites-enabled/
 
 sudo mkdir -p /home/ubuntu/www
 sudo chown -R ubuntu:www-data /home/ubuntu/www
 sudo chmod 755 /home/ubuntu/www
 
-# add new site
+# include additional config files
+sudo sed -i -e "s/http {/http {\n\ninclude /etc/nginx/sites-enabled/*.conf;\n\n/g" /etc/nginx/nginx.conf
+
+
+
+
+
+
