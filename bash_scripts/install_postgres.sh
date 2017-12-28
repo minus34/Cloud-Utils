@@ -20,8 +20,9 @@ sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6-postgis-2.3 postgresql-contrib-9.6
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgis
 
-# TO DO : add Postgres to PATH
-#echo "the path" >> greetings.txt
+# TO DO : add Postgres to PATH (for all users)
+echo "PATH=$PATH:/usr/lib/postgresql/9.6/bin" | sudo tee --append /etc/environment
+source /etc/environment
 
 # alter postgres user and create database
 sudo -u postgres psql -c "ALTER USER postgres ENCRYPTED PASSWORD '{0}';"
@@ -33,7 +34,7 @@ sudo -u postgres psql -c "CREATE USER rouser WITH ENCRYPTED PASSWORD '{1}';" pos
 sudo -u postgres psql -c "GRANT CONNECT ON DATABASE postgres TO rouser;" postgres
 sudo -u postgres psql -c "GRANT USAGE ON SCHEMA public TO rouser;" postgres
 sudo -u postgres psql -c "GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO rouser;" postgres
-sudo -u postgres psql -c "GRANT SELECT ON ALL TABLES IN SCHEMA public to rouser;" postgres
+sudo -u postgres psql -c "GRANT SELECT ON ALL TABLES IN SCHEMA public to rouser;" postgres  # for PostGIS coordinate systems
 sudo -u postgres psql -c "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO rouser;" postgres  # for PostGIS functions
 
 # whitelist postgres clients (if any)
