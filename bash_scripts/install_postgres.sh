@@ -20,6 +20,9 @@ sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgresql-9.6-postgis-2.3 postgresql-contrib-9.6
 sudo DEBIAN_FRONTEND=noninteractive apt -q -y install postgis
 
+# TO DO : add Postgres to PATH
+#echo "the path" >> greetings.txt
+
 # alter postgres user and create database
 sudo -u postgres psql -c "ALTER USER postgres ENCRYPTED PASSWORD '{0}';"
 #sudo -u postgres psql -c "CREATE EXTENSION adminpack;CREATE EXTENSION postgis;" postgres
