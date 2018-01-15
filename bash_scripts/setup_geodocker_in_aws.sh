@@ -7,7 +7,7 @@
 
 VERSION="1.3.2"
 
-KEY_NAME="default"
+KEY_NAME="Default"
 
 aws emr create-cluster                                \
     --name "GeoDocker GeoMesa"                        \
