@@ -3,6 +3,8 @@
 # ---------------------------------------------------------------------------------------
 # Installs The GeoDocker stack (Hadoop/Accumulo/Spark/GeoMesa) on AWS Elastic Map Reduce
 #
+# http://www.geomesa.org/documentation/tutorials/geodocker-geomesa-spark-on-aws.html
+#
 # ---------------------------------------------------------------------------------------
 
 VERSION="1.3.2"
