@@ -94,51 +94,74 @@ def main():
     settings["geomesa_fs_spark_jar"] = "{}/dist/spark/geomesa-fs-spark-runtime_2.11-{}.jar"\
         .format(settings["geomesa_fs_home"], settings["geomesa_version"])
 
-    # set S3 and HDFS paths - must use the s3a:// URL prefix for S3
+    # set S3 and HDFS paths - must use the s3a:// prefix for S3 files
     settings["source_s3_path"] = "s3a://{}/{}".format(settings["source_s3_bucket"], settings["source_s3_directory"])
     settings["temp_hdfs_path"] = "{}/tmp/geomesa_ingest".format(settings["hdfs_path"], )
     settings["target_s3_path"] = "s3a://{}/{}".format(settings["target_s3_bucket"], settings["target_s3_directory"])
 
     # The GeoMesa ingest Bash command
-    geomesa_ingest_command = """{0}/bin/geomesa-fs ingest \
-                                    --path '{1}' \
-                                    --encoding parquet \
-                                    --feature-name {2} \
-                                    --spec {3} \
-                                    --converter {4} \
-                                    --partition-scheme {5} \
-                                    --leaf-storage true \
-                                    --num-reducers {6} \
-                                    '{7}/*.csv'""" \
+    ingest_command = """{0}/bin/geomesa-fs ingest \
+                            --path '{1}' \
+                            --encoding parquet \
+                            --feature-name {2} \
+                            --spec {3} \
+                            --converter {4} \
+                            --partition-scheme {5} \
+                            --leaf-storage true \
+                            --num-reducers {6} \
+                            '{7}/*.csv'""" \
         .format(settings["geomesa_fs_home"], settings["target_s3_path"], settings["geomesa_schema"],
                 settings["sft_config"], settings["sft_converter"], settings["partition_schema"],
                 settings["num_reducers"], settings["temp_hdfs_path"])
 
-    # set Spark config
-    conf = geomesa_pyspark.configure(
-        jars=[settings["geomesa_fs_spark_jar"]],
-        packages=["geomesa_pyspark", "pytz"],
-        spark_home=settings["spark_home"]) \
-        .setAppName("GeoMesa_Ingest_Test")
-
-    conf.set("spark.hadoop.fs.s3.fast.upload", "true")
-    conf.set("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
-    conf.set("spark.speculation", "false")
-    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    conf.set("spark.kryo.registrator", "org.locationtech.geomesa.spark.GeoMesaSparkKryoRegistrator")
-    # conf.set("spark.shuffle.service.enabled", "true")
-    # conf.set("spark.dynamicAllocation.enabled", "true")
-
-    conf.get("spark.master")
-
-    # create a SparkSession
-    spark = SparkSession \
-        .builder \
-        .config(conf=conf) \
-        .enableHiveSupport() \
-        .getOrCreate()
-
+    # 1 - create a Spark session
+    spark = get_spark_session(settings)
     logger.info("Pyspark session initiated : {}".format(datetime.datetime.now() - start_time,))
+
+    # 2 - convert text files on S3 to GeoMesa parquet files on S3
+    convert_to_geomesa_parquet(ingest_command, settings, spark)
+
+    # 3 - create a geomesa dataframe and run a spatial query on it
+    run_geomesa_query(settings, spark)
+
+    spark.stop()
+
+
+def run_geomesa_query(settings, spark):
+
+    logger.info("querying GeoMesa dataframe")
+
+    start_time = datetime.datetime.now()
+
+    # create input dataframe and a temporary view of it
+    geomesa_data_frame = spark \
+        .read \
+        .format("geomesa") \
+        .option("geomesa.feature", settings["geomesa_schema"]) \
+        .option("fs.path", settings["target_s3_path"]) \
+        .load()
+
+    geomesa_data_frame.createOrReplaceTempView("points")
+
+    logger.info("\t- points data view created : {}".format(datetime.datetime.now() - start_time, ))
+    start_time = datetime.datetime.now()
+
+    spatial_query = """SELECT globalEventId,
+                         actor1Name,
+                         actor2Name,
+                         st_bufferPoint(geom, 100) AS geom
+                         FROM points"""
+
+    # show the query results
+    spark.sql(spatial_query).show()
+
+    logger.info("\t- query run : {}".format(datetime.datetime.now() - start_time, ))
+
+    # remove data frame from cache (not sure if required to clean up memory)
+    geomesa_data_frame.unpersist()
+
+
+def convert_to_geomesa_parquet(ingest_command, settings, spark):
 
     # convert start and end date strings to dates
     start_date = datetime.datetime.strptime(settings["start_date"], '%Y-%m-%d')
@@ -154,7 +177,7 @@ def main():
         date_string = current_date.strftime('%Y-%m-%d')
         yyyy_mm_dd = date_string.split("-")
 
-        logger.info("{} : START".format(date_string,))
+        logger.info("{} : START".format(date_string, ))
 
         # e.g. 's3a://gdelt-open-data/events/20180301*'
         source_file_path = "{}/{}{}{}*" \
@@ -170,7 +193,7 @@ def main():
 
         input_data_frame.createOrReplaceTempView("raw_data")
 
-        logger.info("\t- raw data view created : {}".format(datetime.datetime.now() - start_time,))
+        logger.info("\t- raw data view created : {}".format(datetime.datetime.now() - start_time, ))
         start_time = datetime.datetime.now()
 
         # run a SQL statement to filter the data and output result to HDFS
@@ -186,12 +209,12 @@ def main():
         input_data_frame.unpersist()
 
         logger.info("\t- data transformed, filtered & written to HDFS : {}"
-                    .format(datetime.datetime.now() - start_time,))
+                    .format(datetime.datetime.now() - start_time, ))
         start_time = datetime.datetime.now()
 
         # run GeoMesa command-line ingest of HDFS file - output to S3
         logger.info("\t- start GeoMesa ingest")
-        result = check_output(geomesa_ingest_command, shell=True).split("\n")
+        result = check_output(ingest_command, shell=True).split("\n")
 
         for line in result:
             line = line.strip()
@@ -199,13 +222,40 @@ def main():
                 logger.warning(line)
 
         logger.info("\t- data converted to GeoMesa parquet & written to S3 : {}"
-                    .format(datetime.datetime.now() - start_time,))
+                    .format(datetime.datetime.now() - start_time, ))
 
         logger.info("{} : DONE : {}".format(date_string, datetime.datetime.now() - day_start_time))
 
         current_date += datetime.timedelta(days=1)
 
-    spark.stop()
+
+def get_spark_session(settings):
+
+    # set Spark config
+    conf = geomesa_pyspark.configure(
+        jars=[settings["geomesa_fs_spark_jar"]],
+        packages=["geomesa_pyspark", "pytz"],
+        spark_home=settings["spark_home"]) \
+        .setAppName("geoMesa conversion test")
+
+    conf.set("spark.hadoop.fs.s3.fast.upload", "true")
+    conf.set("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+    conf.set("spark.speculation", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    conf.set("spark.kryo.registrator", "org.locationtech.geomesa.spark.GeoMesaSparkKryoRegistrator")
+    # conf.set("spark.shuffle.service.enabled", "true")
+    # conf.set("spark.dynamicAllocation.enabled", "true")
+
+    conf.get("spark.master")
+
+    # create the SparkSession
+    spark = SparkSession \
+        .builder \
+        .config(conf=conf) \
+        .enableHiveSupport() \
+        .getOrCreate()
+
+    return spark
 
 
 if __name__ == '__main__':
