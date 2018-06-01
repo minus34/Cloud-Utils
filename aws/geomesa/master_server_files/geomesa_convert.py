@@ -83,10 +83,13 @@ def main():
     # number of reducers for GeoMesa ingest (determines how the reduce tasks get split up)
     settings["num_reducers"] = 16
 
+    # the name of the view created from the input dataframe
+    settings["input_view"] = "raw_data"
+
     # filter data by Australia
-    settings["sql"] = """SELECT * FROM raw_data
+    settings["sql"] = """SELECT * FROM {}
                            WHERE _c39 > -43.9 AND _c39 < -9.1
-                           AND _c40 > 112.8 AND _c40 < 154.0"""
+                           AND _c40 > 112.8 AND _c40 < 154.0""".format(settings["input_view"],)
 
     # -------------------------------------------------------------------------
 
@@ -100,16 +103,16 @@ def main():
     settings["target_s3_path"] = "s3a://{}/{}".format(settings["target_s3_bucket"], settings["target_s3_directory"])
 
     # The GeoMesa ingest Bash command
-    ingest_command = """{0}/bin/geomesa-fs ingest \
-                            --path '{1}' \
-                            --encoding parquet \
-                            --feature-name {2} \
-                            --spec {3} \
-                            --converter {4} \
-                            --partition-scheme {5} \
-                            --leaf-storage true \
-                            --num-reducers {6} \
-                            '{7}/*.csv'""" \
+    settings["ingest_command_line"] = """{0}/bin/geomesa-fs ingest \
+                                            --path '{1}' \
+                                            --encoding parquet \
+                                            --feature-name {2} \
+                                            --spec {3} \
+                                            --converter {4} \
+                                            --partition-scheme {5} \
+                                            --leaf-storage true \
+                                            --num-reducers {6} \
+                                            '{7}/*.csv'""" \
         .format(settings["geomesa_fs_home"], settings["target_s3_path"], settings["geomesa_schema"],
                 settings["sft_config"], settings["sft_converter"], settings["partition_schema"],
                 settings["num_reducers"], settings["temp_hdfs_path"])
@@ -119,7 +122,7 @@ def main():
     logger.info("Pyspark session initiated : {}".format(datetime.datetime.now() - start_time,))
 
     # 2 - convert text files on S3 to GeoMesa parquet files on S3
-    convert_to_geomesa_parquet(ingest_command, settings, spark)
+    convert_to_geomesa_parquet(settings, spark)
 
     # 3 - create a geomesa dataframe and run a spatial query on it
     run_geomesa_query(settings, spark)
@@ -161,7 +164,7 @@ def run_geomesa_query(settings, spark):
     geomesa_data_frame.unpersist()
 
 
-def convert_to_geomesa_parquet(ingest_command, settings, spark):
+def convert_to_geomesa_parquet(settings, spark):
 
     # convert start and end date strings to dates
     start_date = datetime.datetime.strptime(settings["start_date"], '%Y-%m-%d')
@@ -172,7 +175,6 @@ def convert_to_geomesa_parquet(ingest_command, settings, spark):
     # for each day - copy file
     while current_date <= end_date:
         day_start_time = datetime.datetime.now()
-        start_time = day_start_time
 
         date_string = current_date.strftime('%Y-%m-%d')
         yyyy_mm_dd = date_string.split("-")
@@ -183,50 +185,59 @@ def convert_to_geomesa_parquet(ingest_command, settings, spark):
         source_file_path = "{}/{}{}{}*" \
             .format(settings["source_s3_path"], yyyy_mm_dd[0], yyyy_mm_dd[1], yyyy_mm_dd[2])
 
-        # create input dataframe and a temporary view of it
-        input_data_frame = spark \
-            .read \
-            .load(source_file_path,
-                  format=settings["source_format"],
-                  delimiter=settings["source_delimiter"],
-                  header=settings["source_header"])
-
-        input_data_frame.createOrReplaceTempView("raw_data")
-
-        logger.info("\t- raw data view created : {}".format(datetime.datetime.now() - start_time, ))
-        start_time = datetime.datetime.now()
-
-        # run a SQL statement to filter the data and output result to HDFS
-        spark.sql(settings["sql"]) \
-            .write \
-            .save(settings["temp_hdfs_path"],
-                  mode='overwrite',
-                  format=settings["source_format"],
-                  delimiter=settings["source_delimiter"],
-                  header=settings["source_header"])
-
-        # remove data frame from cache (not sure if required to clean up memory)
-        input_data_frame.unpersist()
-
-        logger.info("\t- data transformed, filtered & written to HDFS : {}"
-                    .format(datetime.datetime.now() - start_time, ))
-        start_time = datetime.datetime.now()
-
-        # run GeoMesa command-line ingest of HDFS file - output to S3
-        logger.info("\t- start GeoMesa ingest")
-        result = check_output(ingest_command, shell=True).split("\n")
-
-        for line in result:
-            line = line.strip()
-            if line is not None and line != "":
-                logger.warning(line)
-
-        logger.info("\t- data converted to GeoMesa parquet & written to S3 : {}"
-                    .format(datetime.datetime.now() - start_time, ))
+        get_dataframe_and_view(settings, source_file_path, spark)
+        filter_and_output_view(settings, spark)
+        convert_data_to_geomesa(settings)
 
         logger.info("{} : DONE : {}".format(date_string, datetime.datetime.now() - day_start_time))
 
         current_date += datetime.timedelta(days=1)
+
+
+def get_dataframe_and_view(settings, source_file_path, spark):
+    start_time = datetime.datetime.now()
+
+    # create input dataframe and a temporary view of it
+    input_data_frame = spark \
+        .read \
+        .load(source_file_path,
+              format=settings["source_format"],
+              delimiter=settings["source_delimiter"],
+              header=settings["source_header"])
+
+    input_data_frame.createOrReplaceTempView(settings["input_view"])
+
+    logger.info("\t- view of input data created : {}".format(datetime.datetime.now() - start_time, ))
+
+
+def filter_and_output_view(settings, spark):
+    start_time = datetime.datetime.now()
+
+    # run a SQL statement to prep the data and output result to HDFS
+    spark.sql(settings["sql"]) \
+        .write \
+        .save(settings["temp_hdfs_path"],
+              mode='overwrite',
+              format=settings["source_format"],
+              delimiter=settings["source_delimiter"],
+              header=settings["source_header"])
+
+    logger.info("\t- data transformed, filtered & written to HDFS : {}".format(datetime.datetime.now() - start_time, ))
+
+
+def convert_data_to_geomesa(settings):
+    start_time = datetime.datetime.now()
+
+    # run GeoMesa command-line ingest of HDFS file - output to S3
+    logger.info("\t- start GeoMesa ingest")
+    result = check_output(settings["ingest_command_line"], shell=True).split("\n")
+    for line in result:
+        line = line.strip()
+        if line is not None and line != "":
+            logger.warning(line)
+
+    logger.info("\t- data converted to GeoMesa parquet & written to S3 : {}"
+                .format(datetime.datetime.now() - start_time, ))
 
 
 def get_spark_session(settings):
