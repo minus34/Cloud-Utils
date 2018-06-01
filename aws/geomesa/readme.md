@@ -5,10 +5,14 @@
 You'll need to have already setup an EC2 key pair as well as the EMR_Default and EMR_EC2_Default roles
 
 Using the AWS Console - create an EMR instance
- - Use the Quick Options
+ - Click on Go to advanced options
  - Choose the emr-5.12.1 release
- - Select Spark as the application
- - Leave the number of instances at 3 (unless you want to pay more and run it a bit faster)
+ - Select Hadoop, Hive and Spark to install
+ - Click next
+ - Leave the number of core servers at 2 (unless you want to run it a bit faster)
+ - Click next
+ - Give your cluster a meaningful name like "Geomesa Test"
+ - Click next
  - Select your key pair
  - Create the cluster
 

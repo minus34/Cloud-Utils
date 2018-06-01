@@ -20,9 +20,7 @@ echo -e "\n# Pyspark paths" >> .bashrc
 echo "export SPARK_HOME=/usr/lib/spark" >> .bashrc
 source .bashrc
 
-echo "export PYTHONPATH=$SPARK_HOME/python/lib/py4j-0.10.4-src.zip" >> .bashrc
-source .bashrc
-echo "export PYTHONPATH=$SPARK_HOME/python:$PYTHONPATH" >> .bashrc
+#echo "export PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.4-src.zip" >> .bashrc
 
 echo -e "\n# Hadoop paths" >> .bashrc
 echo "export HADOOP_HOME=/usr/lib/hadoop" >> .bashrc

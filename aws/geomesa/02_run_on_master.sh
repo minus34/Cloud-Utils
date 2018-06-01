@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 
-# RUN THIS ON THE EMR MASTER SERVER
+# RUN THESE ON THE EMR MASTER SERVER, ONE AT A TIME
 
 # install GeoMesa and it's dependancies (takes 8-10 mins)
 . install-geomesa.sh
 
-# run the pyspark script to convert Life360 raw points into GeoMesa parquet
-spark-submit --jars $GEOMESA_FS_HOME/dist/spark/geomesa-fs-spark-runtime_2.11-$GEOMESA_VERSION.jar test.py
+# run the pyspark script to convert GDELT raw data into GeoMesa parquet
+spark-submit --jars $GEOMESA_FS_HOME/dist/spark/geomesa-fs-spark-runtime_2.11-$GEOMESA_VERSION.jar geomesa_convert.py --target-s3-bucket <your output s3 bucket>
+
+
+
+
+
+
+
+# USEFUL DEBUGGING STUFF
+
+## look at the filtered temp file on HDFS
+#hadoop fs -cat /tmp/geomesa_ingest/*.csv | head -10

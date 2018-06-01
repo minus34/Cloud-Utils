@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# RUN THIS ON YOUR MACHINE
+# RUN THIS FILE ON YOUR MACHINE
 
 # set your IP address
 ip_address="<your EMR master server IP address>"

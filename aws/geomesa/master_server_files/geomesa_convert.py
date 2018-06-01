@@ -1,23 +1,25 @@
 """
 -----------------------------------------------------------------------------------------------------------------------
 
-Purpose: Takes raw GDELT data & converts it to GeoMesa parquet format using Pyspark on an AWS EMR instance
+Purpose: Takes GDELT data on S3, filters it & converts it to GeoMesa parquet format using Pyspark on an AWS EMR instance
 
 Author:  Hugh Saalmans
 
 Created: 31/05/2018
 
 Workflow:
-  1. create Spark dataframe from S3 files
-  2. filter data using SparkSQL and output to temp HDFS directory
-  3. ingest HDFS file into GeoMesa parquet format and output to S3
+  1. create Spark dataframe from delimited text files on S3
+  2. filter data using SparkSQL and output to temp HDFS directory as delimited text
+  3. convert HDFS file into GeoMesa parquet format and output to S3
 
 Notes:
   - Code loads the data one day at a time, this is for testing on small EMR instances (e.g. 1 master, 2 core servers)
+  - Takes 3-4 mins per day of data on a 3 server cluster (1 master, 2 core servers)
 
 -----------------------------------------------------------------------------------------------------------------------
 """
 
+import argparse
 import datetime
 import geomesa_pyspark
 import os
@@ -30,6 +32,15 @@ from subprocess import check_output
 def main():
     start_time = datetime.datetime.now()
 
+    parser = argparse.ArgumentParser(
+        description='Takes GDELT data on S3, filters it & converts it to GeoMesa parquet format '
+                    'using Pyspark on an AWS EMR instance')
+
+    parser.add_argument(
+        '--target-s3-bucket', help='The S3 bucket for the output GeoMesa parquet files')
+
+    args = parser.parse_args()
+
     settings = dict()
 
     # Spark & GeoMesa environment vars
@@ -40,32 +51,42 @@ def main():
     settings["geomesa_fs_home"] = os.environ["GEOMESA_FS_HOME"]
 
     # -------------------------------------------------------------------------
-    # Edit these to taste (feel free to convert this bit to runtime arguments)
+    # Edit these to taste (feel free to convert these to runtime arguments)
     # -------------------------------------------------------------------------
 
     # date range of data to convert
-    settings["start_date"] = "2018-03-01"
-    settings["end_date"] = "2018-03-31"
+    settings["start_date"] = "2017-05-01"
+    settings["end_date"] = "2017-05-02"
 
     # name of the GeoMesa schema, aka feature name
     settings["geomesa_schema"] = "gdelt"
 
     # SimpleFeatureType & Converter - can be an existing sft or a config file
-    settings["sft_config"] = "gdelt"
-    settings["sft_converter"] = "gdelt"
+    settings["sft_config"] = "{}/gdelt.conf".format(settings["home"],)
+    settings["sft_converter"] = "{}/gdelt.conf".format(settings["home"],)
 
     # GeoMesa partition schema to use, note: leaf storage is set to true
     settings["partition_schema"] = "daily,z2-4bit"
+
+    # file format settings
+    settings["source_format"] = "csv"
+    settings["source_delimiter"] = "\t"
+    settings["source_header"] = "false"
 
     # AWS S3 & EMR settings
     settings["source_s3_bucket"] = "gdelt-open-data"
     settings["source_s3_directory"] = "events"
 
-    settings["target_s3_bucket"] = "<your S3 bucket>"
+    settings["target_s3_bucket"] = args.target_s3_bucket
     settings["target_s3_directory"] = "geomesa_test"
 
     # number of reducers for GeoMesa ingest (determines how the reduce tasks get split up)
     settings["num_reducers"] = 16
+
+    # filter data by Australia
+    settings["sql"] = """SELECT * FROM raw_data
+                           WHERE _c39 > -43.9 AND _c39 < -9.1
+                           AND _c40 > 112.8 AND _c40 < 154.0"""
 
     # -------------------------------------------------------------------------
 
@@ -79,16 +100,16 @@ def main():
     settings["target_s3_path"] = "s3a://{}/{}".format(settings["target_s3_bucket"], settings["target_s3_directory"])
 
     # The GeoMesa ingest Bash command
-    THE_INGEST = """{0}/bin/geomesa-fs ingest \
-                        --path '{1}' \
-                        --encoding parquet \
-                        --feature-name {2} \
-                        --spec {3} \
-                        --converter {4} \
-                        --partition-scheme {5} \
-                        --leaf-storage true \
-                        --num-reducers {6} \
-                        '{7}/*.csv'""" \
+    geomesa_ingest_command = """{0}/bin/geomesa-fs ingest \
+                                    --path '{1}' \
+                                    --encoding parquet \
+                                    --feature-name {2} \
+                                    --spec {3} \
+                                    --converter {4} \
+                                    --partition-scheme {5} \
+                                    --leaf-storage true \
+                                    --num-reducers {6} \
+                                    '{7}/*.csv'""" \
         .format(settings["geomesa_fs_home"], settings["target_s3_path"], settings["geomesa_schema"],
                 settings["sft_config"], settings["sft_converter"], settings["partition_schema"],
                 settings["num_reducers"], settings["temp_hdfs_path"])
@@ -105,8 +126,8 @@ def main():
     conf.set("spark.speculation", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     conf.set("spark.kryo.registrator", "org.locationtech.geomesa.spark.GeoMesaSparkKryoRegistrator")
-    conf.set("spark.shuffle.service.enabled", "true")
-    conf.set("spark.dynamicAllocation.enabled", "true")
+    # conf.set("spark.shuffle.service.enabled", "true")
+    # conf.set("spark.dynamicAllocation.enabled", "true")
 
     conf.get("spark.master")
 
@@ -123,10 +144,10 @@ def main():
     start_date = datetime.datetime.strptime(settings["start_date"], '%Y-%m-%d')
     end_date = datetime.datetime.strptime(settings["end_date"], '%Y-%m-%d')
 
-    current_date = end_date
+    current_date = start_date
 
     # for each day - copy file
-    while current_date >= start_date:
+    while current_date <= end_date:
         day_start_time = datetime.datetime.now()
         start_time = day_start_time
 
@@ -140,17 +161,28 @@ def main():
             .format(settings["source_s3_path"], yyyy_mm_dd[0], yyyy_mm_dd[1], yyyy_mm_dd[2])
 
         # create input dataframe and a temporary view of it
-        input_data_frame = spark.read.load(source_file_path, format="csv", delimiter="|", header="false")
+        input_data_frame = spark \
+            .read \
+            .load(source_file_path,
+                  format=settings["source_format"],
+                  delimiter=settings["source_delimiter"],
+                  header=settings["source_header"])
+
         input_data_frame.createOrReplaceTempView("raw_data")
 
         logger.info("\t- raw data view created : {}".format(datetime.datetime.now() - start_time,))
         start_time = datetime.datetime.now()
 
-        # run a SQL statement to filter and transform the data - and output to HDFS
-        spark.sql(THE_SQL).write.save(settings["temp_hdfs_path"],
-                                      format='csv', delimiter="|", mode='overwrite', header='false')
+        # run a SQL statement to filter the data and output result to HDFS
+        spark.sql(settings["sql"]) \
+            .write \
+            .save(settings["temp_hdfs_path"],
+                  mode='overwrite',
+                  format=settings["source_format"],
+                  delimiter=settings["source_delimiter"],
+                  header=settings["source_header"])
 
-        # remove data frames from cache (not sure if required to clean up RAM)
+        # remove data frame from cache (not sure if required to clean up memory)
         input_data_frame.unpersist()
 
         logger.info("\t- data transformed, filtered & written to HDFS : {}"
@@ -159,24 +191,21 @@ def main():
 
         # run GeoMesa command-line ingest of HDFS file - output to S3
         logger.info("\t- start GeoMesa ingest")
-        ingest_result = check_output(THE_INGEST, shell=True)
+        result = check_output(geomesa_ingest_command, shell=True).split("\n")
+
+        for line in result:
+            line = line.strip()
+            if line is not None and line != "":
+                logger.warning(line)
 
         logger.info("\t- data converted to GeoMesa parquet & written to S3 : {}"
                     .format(datetime.datetime.now() - start_time,))
 
         logger.info("{} : DONE : {}".format(date_string, datetime.datetime.now() - day_start_time))
 
-        current_date -= datetime.timedelta(days=1)
-
-    logger.info("")
+        current_date += datetime.timedelta(days=1)
 
     spark.stop()
-
-
-# filter data by Australia
-THE_SQL = """SELECT * FROM raw_data
-               WHERE _c40 > -43.9 AND _c40 < -9.1
-               AND _c41 > 112.8 AND _c41 < 154.0"""
 
 
 if __name__ == '__main__':
@@ -186,10 +215,12 @@ if __name__ == '__main__':
 
     # set logger
     log_file = os.path.abspath(__file__).replace(".py", ".log")
-    logging.basicConfig(filename=log_file, level=logging.DEBUG, format="%(asctime)s %(message)s",
+    logging.basicConfig(filename=log_file,
+                        level=logging.DEBUG,
+                        format="%(asctime)s %(message)s",
                         datefmt="%m/%d/%Y %I:%M:%S %p")
-    logging.getLogger('py4j').setLevel(logging.ERROR)
-    logging.getLogger('pyspark').setLevel(logging.ERROR)
+    logging.getLogger('py4j').setLevel(logging.WARNING)
+    logging.getLogger('pyspark').setLevel(logging.WARNING)
 
     # setup logger to write to screen as well as writing to log file
     # define a Handler which writes INFO messages or higher to the sys.stderr
@@ -202,11 +233,7 @@ if __name__ == '__main__':
     # add the handler to the root logger
     logging.getLogger('').addHandler(console)
 
-    GLOBAL_INFO = list()
-    GLOBAL_ERRORS = list()
-    GLOBAL_WARNINGS = list()
-
-    task_name = "GeoMesa Ingest Test"
+    task_name = "GeoMesa convert"
 
     logger.info("Start {}".format(task_name))
 
@@ -214,17 +241,4 @@ if __name__ == '__main__':
 
     time_taken = datetime.datetime.now() - full_start_time
 
-    # return success, warnings or errors
-    if len(GLOBAL_ERRORS) == 0:
-        if len(GLOBAL_WARNINGS) == 0:
-            hb_status = 1   # success
-            messages = '; '.join(GLOBAL_INFO)
-            logger.info("{0} finished : {1}".format(task_name, time_taken))
-        else:
-            hb_status = 2  # warning
-            messages = '; '.join(GLOBAL_WARNINGS)
-            logger.warning("{0} finished - with warnings! : {1}".format(task_name, time_taken))
-    else:
-        hb_status = 0  # failure
-        messages = '; '.join(GLOBAL_ERRORS)
-        logger.error("{0} finished - with errors! : {1}".format(task_name, time_taken))
+    logger.info("{0} finished : {1}".format(task_name, time_taken))
