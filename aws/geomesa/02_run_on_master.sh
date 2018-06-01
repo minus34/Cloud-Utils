@@ -2,7 +2,7 @@
 
 # RUN THESE ON THE EMR MASTER SERVER, ONE AT A TIME
 
-# install GeoMesa and it's dependancies (takes 8-10 mins)
+# install GeoMesa and it's dependencies (takes 8-10 mins)
 . install-geomesa.sh
 
 # run the pyspark script to convert GDELT raw data into GeoMesa parquet
