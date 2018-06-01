@@ -10,7 +10,7 @@ Created: 31/05/2018
 Workflow:
   1. create Spark dataframe from delimited text files on S3
   2. filter data using SparkSQL and output to temp HDFS directory as delimited text
-  3. convert HDFS file into GeoMesa parquet format and output to S3
+  3. convert temp HDFS data into GeoMesa parquet format and output to S3
 
 Notes:
   - Code loads the data one day at a time, this is for testing on small EMR instances (e.g. 1 master, 2 core servers)
@@ -130,49 +130,43 @@ def main():
     spark.stop()
 
 
-def run_geomesa_query(settings, spark):
+def get_spark_session(settings):
+    # set Spark config
+    conf = geomesa_pyspark.configure(
+        jars=[settings["geomesa_fs_spark_jar"]],
+        packages=["geomesa_pyspark", "pytz"],
+        spark_home=settings["spark_home"]) \
+        .setAppName("geoMesa conversion test")
 
-    logger.info("querying GeoMesa dataframe")
+    conf.set("spark.hadoop.fs.s3.fast.upload", "true")
+    conf.set("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+    conf.set("spark.speculation", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    conf.set("spark.kryo.registrator", "org.locationtech.geomesa.spark.GeoMesaSparkKryoRegistrator")
+    # conf.set("spark.shuffle.service.enabled", "true")
+    # conf.set("spark.dynamicAllocation.enabled", "true")
 
-    start_time = datetime.datetime.now()
+    conf.get("spark.master")
 
-    # create input dataframe and a temporary view of it
-    geomesa_data_frame = spark \
-        .read \
-        .format("geomesa") \
-        .option("geomesa.feature", settings["geomesa_schema"]) \
-        .option("fs.path", settings["target_s3_path"]) \
-        .load()
+    # create the SparkSession
+    spark = SparkSession \
+        .builder \
+        .config(conf=conf) \
+        .enableHiveSupport() \
+        .getOrCreate()
 
-    geomesa_data_frame.createOrReplaceTempView("points")
-
-    logger.info("\t- points data view created : {}".format(datetime.datetime.now() - start_time, ))
-    start_time = datetime.datetime.now()
-
-    spatial_query = """SELECT globalEventId,
-                         actor1Name,
-                         actor2Name,
-                         st_bufferPoint(geom, 100) AS geom
-                         FROM points"""
-
-    # show the query results
-    spark.sql(spatial_query).show()
-
-    logger.info("\t- query run : {}".format(datetime.datetime.now() - start_time, ))
-
-    # remove data frame from cache (not sure if required to clean up memory)
-    geomesa_data_frame.unpersist()
+    return spark
 
 
 def convert_to_geomesa_parquet(settings, spark):
-
     # convert start and end date strings to dates
     start_date = datetime.datetime.strptime(settings["start_date"], '%Y-%m-%d')
     end_date = datetime.datetime.strptime(settings["end_date"], '%Y-%m-%d')
 
     current_date = start_date
 
-    # for each day - copy file
+    # for each day...
+    # create a view of the input data, filter it, output it to HDFS, convert into to GeoMesa parquet and output to S3
     while current_date <= end_date:
         day_start_time = datetime.datetime.now()
 
@@ -213,7 +207,7 @@ def get_dataframe_and_view(settings, source_file_path, spark):
 def filter_and_output_view(settings, spark):
     start_time = datetime.datetime.now()
 
-    # run a SQL statement to prep the data and output result to HDFS
+    # run a SQL statement to prep the data and output result to temp location (HDFS in this example)
     spark.sql(settings["sql"]) \
         .write \
         .save(settings["temp_hdfs_path"],
@@ -228,9 +222,12 @@ def filter_and_output_view(settings, spark):
 def convert_data_to_geomesa(settings):
     start_time = datetime.datetime.now()
 
-    # run GeoMesa command-line ingest of HDFS file - output to S3
     logger.info("\t- start GeoMesa ingest")
+
+    # run GeoMesa command-line ingest
     result = check_output(settings["ingest_command_line"], shell=True).split("\n")
+
+    # log any output - no output=all good!
     for line in result:
         line = line.strip()
         if line is not None and line != "":
@@ -240,33 +237,37 @@ def convert_data_to_geomesa(settings):
                 .format(datetime.datetime.now() - start_time, ))
 
 
-def get_spark_session(settings):
+def run_geomesa_query(settings, spark):
+    logger.info("querying GeoMesa dataframe")
 
-    # set Spark config
-    conf = geomesa_pyspark.configure(
-        jars=[settings["geomesa_fs_spark_jar"]],
-        packages=["geomesa_pyspark", "pytz"],
-        spark_home=settings["spark_home"]) \
-        .setAppName("geoMesa conversion test")
+    start_time = datetime.datetime.now()
 
-    conf.set("spark.hadoop.fs.s3.fast.upload", "true")
-    conf.set("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
-    conf.set("spark.speculation", "false")
-    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    conf.set("spark.kryo.registrator", "org.locationtech.geomesa.spark.GeoMesaSparkKryoRegistrator")
-    # conf.set("spark.shuffle.service.enabled", "true")
-    # conf.set("spark.dynamicAllocation.enabled", "true")
+    # create input dataframe and a temporary view of it
+    geomesa_data_frame = spark \
+        .read \
+        .format("geomesa") \
+        .option("geomesa.feature", settings["geomesa_schema"]) \
+        .option("fs.path", settings["target_s3_path"]) \
+        .load()
 
-    conf.get("spark.master")
+    geomesa_data_frame.createOrReplaceTempView("points")
 
-    # create the SparkSession
-    spark = SparkSession \
-        .builder \
-        .config(conf=conf) \
-        .enableHiveSupport() \
-        .getOrCreate()
+    logger.info("\t- points data view created : {}".format(datetime.datetime.now() - start_time, ))
+    start_time = datetime.datetime.now()
 
-    return spark
+    spatial_query = """SELECT globalEventId,
+                         actor1Name,
+                         actor2Name,
+                         st_bufferPoint(geom, 100) AS geom
+                         FROM points"""
+
+    # show the query results
+    spark.sql(spatial_query).show()
+
+    logger.info("\t- query run : {}".format(datetime.datetime.now() - start_time, ))
+
+    # remove data frame from cache (not sure if required to clean up memory)
+    geomesa_data_frame.unpersist()
 
 
 if __name__ == '__main__':
